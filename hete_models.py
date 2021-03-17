@@ -93,6 +93,7 @@ class HeteroGNNWrapperConv(deepsnap.hetero_gnn.HeteroConv):
     def __init__(self, convs, args, aggr="mean"):
         super(HeteroGNNWrapperConv, self).__init__(convs, None)
         self.aggr = aggr
+        self.device = args['device']
 
         # Map the index and message type
         self.mapping = {}
@@ -116,7 +117,7 @@ class HeteroGNNWrapperConv(deepsnap.hetero_gnn.HeteroConv):
             ## 7. We recommend you to implement the mean aggregation first. After 
             ## the mean aggregation works well in the training, then you can 
             ## implement this part.
-            self.aggr_proj = nn.Sequential(nn.Linear(in_features=args['hidden_size'], out_features=args['attn_size']),
+            self.attn_proj = nn.Sequential(nn.Linear(in_features=args['hidden_size'], out_features=args['attn_size']),
                                            nn.Tanh(),
                                            nn.Linear(args['attn_size'], 1, bias=False))
 
@@ -126,7 +127,10 @@ class HeteroGNNWrapperConv(deepsnap.hetero_gnn.HeteroConv):
         super(HeteroGNNWrapperConv, self).reset_parameters()
         if self.aggr == "attn":
             for layer in self.attn_proj.children():
-                layer.reset_parameters()
+                try:
+                    layer.reset_parameters()
+                except:
+                    pass
     
     def forward(self, node_features, edge_indices):
         message_type_emb = {}
@@ -182,10 +186,10 @@ class HeteroGNNWrapperConv(deepsnap.hetero_gnn.HeteroConv):
             ## `view()` function https://pytorch.org/docs/stable/tensor_view.html
             
             # Compute e_m for every message
-            ems = torch.zeros((len(xs),), device=args['device'])
+            ems = torch.zeros((len(xs),), device=self.device)
             for i in range(len(xs)):
                 m = xs[i]
-                em = self.aggr_proj(m) # (3025, 1) 3025 nodes
+                em = self.attn_proj(m) # (3025, 1) 3025 nodes
                 em = torch.mean(em) 
                 ems[i] = em
             # Compute alpha

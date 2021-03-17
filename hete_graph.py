@@ -37,8 +37,8 @@ args = {
     'lr': 0.003,
     'attn_size': 32,
     'run': 2,
-    'epochs': 10,
-    'batch_size': 64,
+    'epochs': 200,
+    'batch_size': 128*2048,
     'eval_steps': 1,
     'log_steps': 1
 }
@@ -49,16 +49,15 @@ def train(model, predictor, hetero_graph, split_edge, optimizer, batch_size):
     model.train()
     predictor.train()
 
-    pos_train_edge = split_edge['train']['edge'].to(hetero_graph.node_label['author'].device
-)
+    pos_train_edge = split_edge['train']['edge'].to(hetero_graph.node_label['author'].device)
 
     total_loss = total_examples = 0
-    for perm in DataLoader(range(10000), batch_size,
+    counter = 0
+    for perm in DataLoader(range(pos_train_edge.size(0)), batch_size,
                            shuffle=True):
-    # for perm in DataLoader(range(pos_train_edge.size(0)), batch_size,
-    #                        shuffle=True):
         optimizer.zero_grad()
-
+        print("Batch Number:", counter)
+        counter += 1
         h = model(hetero_graph.node_feature, hetero_graph.edge_index) # encode every edges with GNN model
 
         edge = pos_train_edge[perm].t() # (2, B)
@@ -89,11 +88,12 @@ def train(model, predictor, hetero_graph, split_edge, optimizer, batch_size):
 
 
 @torch.no_grad()
-def test(model, predictor, data, split_edge, evaluator, batch_size):
+def test(model, predictor, hetero_graph, data, split_edge, evaluator, batch_size):
     model.eval()
     predictor.eval()
 
-    h = model(data.x, data.adj_t)
+    h = model(hetero_graph.node_feature, hetero_graph.edge_index) # encode every edges with GNN model
+    h = h['author']
 
     pos_train_edge = split_edge['train']['edge'].to(h.device)
     pos_valid_edge = split_edge['valid']['edge'].to(h.device)
@@ -119,7 +119,8 @@ def test(model, predictor, data, split_edge, evaluator, batch_size):
         neg_valid_preds += [predictor(h[edge[0]], h[edge[1]]).squeeze().cpu()]
     neg_valid_pred = torch.cat(neg_valid_preds, dim=0)
 
-    h = model(data.x, data.full_adj_t)
+    h = model(hetero_graph.node_feature, hetero_graph.edge_index) # encode every edges with GNN model
+    h = h['author']
 
     pos_test_preds = []
     for perm in DataLoader(range(pos_test_edge.size(0)), batch_size):
@@ -211,7 +212,7 @@ data = T.ToSparseTensor()(data)
 
 split_edge = dataset.get_edge_split()
 
-model = HeteroGNN(hetero_graph, args, aggr="mean").to(args['device'])
+model = HeteroGNN(hetero_graph, args, aggr="attn").to(args['device'])
 
 predictor = LinkPredictor(args['hidden_size'], args['hidden_size'], 1,
                             3, dropout=0).to(args['device'])
@@ -235,8 +236,8 @@ for run in range(args['run']):
         loss = train(model, predictor, hetero_graph, split_edge, optimizer, args['batch_size'])
 
         if epoch % args['eval_steps'] == 0:
-            results = test(model, predictor, data, split_edge, evaluator,
-                            args.batch_size)
+            results = test(model, predictor, hetero_graph, data, split_edge, evaluator,
+                            args['batch_size'])
             for key, result in results.items():
                 loggers[key].add_result(run, result)
 
