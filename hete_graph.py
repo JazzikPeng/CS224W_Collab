@@ -40,7 +40,8 @@ args = {
     'epochs': 200,
     'batch_size': 128*2048,
     'eval_steps': 1,
-    'log_steps': 1
+    'log_steps': 1,
+    'num_years_per_group': 11
 }
 
 
@@ -160,20 +161,40 @@ data = dataset[0]
 
 # Specify all the message types
 years = torch.unique(data.edge_year).numpy().astype(int)
+
+# Group years into groups to reduce granularity. N years per group
+N = args['num_years_per_group']
+num_groups = len(years) // N
 msg_types = []
-for y in [2017]:
-    msg_type = ("author", str(y), "author")
+for i in range(num_groups):
+    grp = years[(i+1) * N - 1]
+    msg_type = ("author", str(grp), "author")
     msg_types.append(msg_type)
 
 # Dictionary of edge indices
 edge_index = {}
 for mt in msg_types:
     y = int(mt[1])
-    yr_idx = (data.edge_year==y).T[0]
+    yr_idx = (data.edge_year<=y).T[0]
     edge_idx = data.edge_index.T[yr_idx]
     edge_idx = torch.cat([edge_idx[edge_idx[:,0] < edge_idx[:,1]], \
                 edge_idx[edge_idx[:,0] > edge_idx[:,1]]]).T
     edge_index[mt] = edge_idx
+
+# msg_types = []
+# for y in years:
+#     msg_type = ("author", str(y), "author")
+#     msg_types.append(msg_type)
+
+# # Dictionary of edge indices
+# edge_index = {}
+# for mt in msg_types:
+#     y = int(mt[1])
+#     yr_idx = (data.edge_year==y).T[0]
+#     edge_idx = data.edge_index.T[yr_idx]
+#     edge_idx = torch.cat([edge_idx[edge_idx[:,0] < edge_idx[:,1]], \
+#                 edge_idx[edge_idx[:,0] > edge_idx[:,1]]]).T
+#     edge_index[mt] = edge_idx
 
 # Dictionary of node features
 node_feature = {}
