@@ -314,9 +314,9 @@ class HeteroGNN(torch.nn.Module):
         ## Note:
         ## 1. `deepsnap.hetero_gnn.forward_op` can be helpful.
         x = self.convs1(x, edge_index)
-        x = forward_op(x, self.bns1)
-        x = forward_op(x, self.relus1)
-        x = self.convs2(x, edge_index)
+        # x = forward_op(x, self.bns1)
+        # x = forward_op(x, self.relus1)
+        # x = self.convs2(x, edge_index)
         ##########################################
         return x
 
