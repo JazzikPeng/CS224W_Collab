@@ -32,9 +32,9 @@ from hete_models import *
 # Please do not change the following parameters
 args = {
     'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
-    'hidden_size': 64,
+    'hidden_size': 128,
     'weight_decay': 1e-5,
-    'lr': 0.003,
+    'lr': 0.01,
     'attn_size': 32,
     'run': 2,
     'epochs': 200,
@@ -212,7 +212,7 @@ data = T.ToSparseTensor()(data)
 
 split_edge = dataset.get_edge_split()
 
-model = HeteroGNN(hetero_graph, args, aggr="attn").to(args['device'])
+model = HeteroGNN(hetero_graph, args, aggr="mean").to(args['device'])
 
 predictor = LinkPredictor(args['hidden_size'], args['hidden_size'], 1,
                             3, dropout=0).to(args['device'])

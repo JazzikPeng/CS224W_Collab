@@ -133,31 +133,51 @@ class HeteroGNNWrapperConv(deepsnap.hetero_gnn.HeteroConv):
                     pass
     
     def forward(self, node_features, edge_indices):
-        message_type_emb = {}
-        for message_key, message_type in edge_indices.items():
-            src_type, edge_type, dst_type = message_key
-            node_feature_src = node_features[src_type]
-            node_feature_dst = node_features[dst_type]
-            edge_index = edge_indices[message_key]
-            message_type_emb[message_key] = (
-                self.convs[message_key](
-                    node_feature_src,
-                    node_feature_dst,
-                    edge_index,
-                )
-            )
-        node_emb = {dst: [] for _, _, dst in message_type_emb.keys()}
-        mapping = {}        
-        for (src, edge_type, dst), item in message_type_emb.items():
-            mapping[len(node_emb[dst])] = (src, edge_type, dst)
-            node_emb[dst].append(item)
-        self.mapping = mapping
-        for node_type, embs in node_emb.items():
-            if len(embs) == 1:
-                node_emb[node_type] = embs[0]
-            else:
-                node_emb[node_type] = self.aggregate(embs)
-        return node_emb
+        # Save CUDA space for mean aggregation
+        if self.aggr == 'mean':
+            num_period = float(len(edge_indices))
+            message_type_emb = {}
+            for message_key, message_type in edge_indices.items():
+                src_type, edge_type, dst_type = message_key
+                node_feature_src = node_features[src_type]
+                node_feature_dst = node_features[dst_type]
+                edge_index = edge_indices[message_key]
+                message_emb = self.convs[message_key](
+                            node_feature_src,
+                            node_feature_dst,
+                            edge_index,
+                        ) / num_period
+                if 'author' in message_type_emb:
+                    message_type_emb['author'] += message_emb
+                else:
+                    message_type_emb['author'] = message_emb
+            return message_type_emb
+
+        # message_type_emb = {}
+        # for message_key, message_type in edge_indices.items():
+        #     src_type, edge_type, dst_type = message_key
+        #     node_feature_src = node_features[src_type]
+        #     node_feature_dst = node_features[dst_type]
+        #     edge_index = edge_indices[message_key]
+        #     message_type_emb[message_key] = (
+        #         self.convs[message_key](
+        #             node_feature_src,
+        #             node_feature_dst,
+        #             edge_index,
+        #         )
+        #     )
+        # node_emb = {dst: [] for _, _, dst in message_type_emb.keys()}
+        # mapping = {}        
+        # for (src, edge_type, dst), item in message_type_emb.items():
+        #     mapping[len(node_emb[dst])] = (src, edge_type, dst)
+        #     node_emb[dst].append(item)
+        # self.mapping = mapping
+        # for node_type, embs in node_emb.items():
+        #     if len(embs) == 1:
+        #         node_emb[node_type] = embs[0]
+        #     else:
+        #         node_emb[node_type] = self.aggregate(embs)
+        # return node_emb
     
     def aggregate(self, xs):
         # TODO: Implement this function that aggregates all message type results.
