@@ -161,7 +161,7 @@ data = dataset[0]
 # Specify all the message types
 years = torch.unique(data.edge_year).numpy().astype(int)
 msg_types = []
-for y in years:
+for y in [2017]:
     msg_type = ("author", str(y), "author")
     msg_types.append(msg_type)
 
