@@ -1,6 +1,8 @@
 """
 Create a Heterogeneous graph for edges in different years.
-(node, year, node), where year can be used a feature of embedding
+Notes
+    - (node, year, node), where year can be used a feature of embedding
+    - Add edge weight to heterogeneous graph
 """
 
 import argparse
@@ -171,8 +173,9 @@ for i in range(num_groups):
     msg_type = ("author", str(grp), "author")
     msg_types.append(msg_type)
 
-# Dictionary of edge indices
+# Dictionary of edge indices # Add edge weight
 edge_index = {}
+edge_weight = {}
 for mt in msg_types:
     y = int(mt[1])
     yr_idx = (data.edge_year<=y).T[0]
@@ -180,6 +183,9 @@ for mt in msg_types:
     edge_idx = torch.cat([edge_idx[edge_idx[:,0] < edge_idx[:,1]], \
                 edge_idx[edge_idx[:,0] > edge_idx[:,1]]]).T
     edge_index[mt] = edge_idx
+    
+    edge_wt = data.edge_weight[yr_idx]
+    edge_weight[mt] = edge_wt
 
 # msg_types = []
 # for y in years:
@@ -200,6 +206,7 @@ for mt in msg_types:
 node_feature = {}
 node_feature["author"] = data.x
 
+# 
 # Dictionary of edge indices, we have one type of node "author"
 node_label = {}
 node_label['author'] = torch.zeros(data.num_nodes, dtype=int)
@@ -209,6 +216,7 @@ hetero_graph = HeteroGraph(
     node_feature=node_feature,
     node_label=node_label,
     edge_index=edge_index,
+    edge_feature=edge_weight,
     directed=False
 )
 print(f"Collab heterogeneous graph: {hetero_graph.num_nodes()} nodes, {hetero_graph.num_edges()} edges")
@@ -222,7 +230,8 @@ for key in hetero_graph.node_label:
 # Edge_index to sparse tensor and to device
 for key in hetero_graph.edge_index:
     edge_index = hetero_graph.edge_index[key]
-    adj = SparseTensor(row=edge_index[0], col=edge_index[1], sparse_sizes=(hetero_graph.num_nodes('author'), hetero_graph.num_nodes('author')))
+    edge_weight = hetero_graph.edge_feature[key].view(-1).to(torch.float)
+    adj = SparseTensor(row=edge_index[0], col=edge_index[1], value=edge_weight, sparse_sizes=(hetero_graph.num_nodes('author'), hetero_graph.num_nodes('author')))
     hetero_graph.edge_index[key] = adj.t().to(args['device'])
 
 
