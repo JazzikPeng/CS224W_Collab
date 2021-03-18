@@ -31,21 +31,19 @@ from logger import Logger
 
 from hete_models import *
 
-# Please do not change the following parameters
 args = {
     'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
     'hidden_size': 128,
     'weight_decay': 1e-5,
-    'lr': 0.01,
-    'attn_size': 32,
+    'lr': 0.003,
+    'attn_size': 64,
     'run': 2,
-    'epochs': 200,
+    'epochs': 400,
     'batch_size': 128*2048,
-    'eval_steps': 1,
-    'log_steps': 1,
-    'num_years_per_group': 11
+    'eval_steps': 10,
+    'log_steps': 10,
+    'num_years_per_group': 7
 }
-
 
 
 def train(model, predictor, hetero_graph, split_edge, optimizer, batch_size):
@@ -55,12 +53,12 @@ def train(model, predictor, hetero_graph, split_edge, optimizer, batch_size):
     pos_train_edge = split_edge['train']['edge'].to(hetero_graph.node_label['author'].device)
 
     total_loss = total_examples = 0
-    counter = 0
+    # ounter = 0
     for perm in DataLoader(range(pos_train_edge.size(0)), batch_size,
                            shuffle=True):
         optimizer.zero_grad()
-        print("Batch Number:", counter)
-        counter += 1
+        # print("Batch Number:", counter)
+        # counter += 1
         h = model(hetero_graph.node_feature, hetero_graph.edge_index) # encode every edges with GNN model
 
         edge = pos_train_edge[perm].t() # (2, B)
@@ -242,7 +240,8 @@ data = T.ToSparseTensor()(data)
 
 split_edge = dataset.get_edge_split()
 
-model = HeteroGNN(hetero_graph, args, aggr="mean").to(args['device'])
+model = HeteroGNN(hetero_graph, args, aggr="attn", conv_layer=HeteroGCNConv).to(args['device'])
+# model = HeteroGNN_GCN(hetero_graph, args, aggr="attn").to(args['device'])
 
 predictor = LinkPredictor(args['hidden_size'], args['hidden_size'], 1,
                             3, dropout=0).to(args['device'])

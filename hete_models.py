@@ -15,6 +15,7 @@ from sklearn.metrics import f1_score
 from deepsnap.hetero_gnn import forward_op
 from deepsnap.hetero_graph import HeteroGraph
 from torch_sparse import SparseTensor, matmul
+from torch_geometric.nn import GCNConv, SAGEConv
 
 class HeteroGNNConv(pyg_nn.MessagePassing):
     def __init__(self, in_channels_src, in_channels_dst, out_channels):
@@ -56,6 +57,86 @@ class HeteroGNNConv(pyg_nn.MessagePassing):
         ############# Your code here #############
         ## (~1 line of code)
         out = self.propagate(edge_index, node_feature_src=node_feature_src, node_feature_dst=node_feature_dst, size=size, res_n_id=res_n_id)
+        return out
+        ##########################################
+
+    def message_and_aggregate(self, edge_index, node_feature_src):
+
+        ############# Your code here #############
+        ## (~1 line of code)
+        ## Note:
+        ## 1. Different from what we implemented in Colab 3, we use message_and_aggregate
+        ## to replace the message and aggregate. The benefit is that we can avoid
+        ## materializing x_i and x_j, and make the implementation more efficient.
+        ## 2. To implement efficiently, following PyG documentation is helpful:
+        ## https://pytorch-geometric.readthedocs.io/en/latest/notes/sparse_tensor.html
+        ## 3. Here edge_index is torch_sparse SparseTensor.
+        out = matmul(edge_index, node_feature_src, reduce='mean')
+        ##########################################
+
+        return out
+
+    def update(self, aggr_out, node_feature_dst, res_n_id):
+
+        ############# Your code here #############
+        ## (~4 lines of code)
+        # Takes in the output of aggregation as first argument
+        src = self.lin_src(aggr_out) 
+        dst = self.lin_dst(node_feature_dst)
+        concat = torch.cat((dst, src), dim=1) # (B, hidden_dim)
+        aggr_out = self.lin_update(concat)
+
+        ##########################################
+
+        return aggr_out
+
+
+class HeteroGCNConv(pyg_nn.MessagePassing):
+    def __init__(self, in_channels_src, in_channels_dst, out_channels):
+        super(HeteroGCNConv, self).__init__(aggr="mean")
+
+        self.in_channels_src = in_channels_src
+        self.in_channels_dst = in_channels_dst
+        self.out_channels = out_channels
+
+        # To simplify implementation, please initialize both self.lin_dst
+        # and self.lin_src out_features to out_channels
+        self.lin_dst = None
+        self.lin_src = None
+
+        # Add GCN Convolution Layer to extract node embedding
+        # Same of src and dst for our problem
+        self.convs = GCNConv(in_channels_src, out_channels) 
+
+        self.lin_update = None
+
+        ############# Your code here #############
+        ## (~3 lines of code)
+        self.lin_dst = nn.Linear(self.in_channels_dst, out_channels)
+        self.lin_src = nn.Linear(self.in_channels_src, out_channels)  
+        self.lin_update = nn.Linear(out_channels*2, out_channels) # 
+        
+        
+
+        ##########################################
+
+    def reset_parameters(self):
+        self.lin_dst.reset_parameters()
+        self.lin_src.reset_parameters()
+        self.lin_update.reset_parameters()
+
+    def forward(
+        self,
+        node_feature_src,
+        node_feature_dst,
+        edge_index,
+        size=None,
+        res_n_id=None,
+    ):
+        ############# Your code here #############
+        ## (~1 line of code)
+        node_feature = self.convs(node_feature_src, edge_index)
+        out = self.propagate(edge_index, node_feature_src=node_feature, node_feature_dst=node_feature, size=size, res_n_id=res_n_id)
         return out
         ##########################################
 
@@ -250,9 +331,8 @@ def generate_convs(hetero_graph, conv, hidden_size, first_layer=False):
     return convs
 
 
-
 class HeteroGNN(torch.nn.Module):
-    def __init__(self, hetero_graph, args, aggr="mean"):
+    def __init__(self, hetero_graph, args, aggr="mean", conv_layer=HeteroGCNConv):
         super(HeteroGNN, self).__init__()
         
         self.graph = hetero_graph
@@ -281,8 +361,8 @@ class HeteroGNN(torch.nn.Module):
         ## where the `out_features` is the number of classes for that node type.
         ## `deepsnap.hetero_graph.HeteroGraph.num_node_labels(node_type)` will be
         ## useful.
-        self.convs1 = HeteroGNNWrapperConv(generate_convs(hetero_graph, HeteroGNNConv, self.hidden_size, first_layer=True), args, aggr=self.aggr)
-        self.convs2 = HeteroGNNWrapperConv(generate_convs(hetero_graph, HeteroGNNConv, self.hidden_size), args, aggr=self.aggr)
+        self.convs1 = HeteroGNNWrapperConv(generate_convs(hetero_graph, conv_layer, self.hidden_size, first_layer=True), args, aggr=self.aggr)
+        self.convs2 = HeteroGNNWrapperConv(generate_convs(hetero_graph, conv_layer, self.hidden_size), args, aggr=self.aggr)
         for nt in hetero_graph.node_types:
             self.bns1[nt] = torch.nn.BatchNorm1d(self.hidden_size, eps=1.0)
             self.bns2[nt] = torch.nn.BatchNorm1d(self.hidden_size, eps=1.0)
@@ -362,3 +442,92 @@ class LinkPredictor(torch.nn.Module):
             x = F.dropout(x, p=self.dropout, training=self.training)
         x = self.lins[-1](x)
         return torch.sigmoid(x)
+
+
+
+
+# Use GNN Layer in HeteroGNN model
+class HeteroGNN_GCN(torch.nn.Module):
+    def __init__(self, hetero_graph, args, aggr="mean"):
+        super(HeteroGNN_GCN, self).__init__()
+        
+        self.graph = hetero_graph
+        self.aggr = aggr
+        self.hidden_size = args['hidden_size']
+
+        self.convs1 = None
+        self.convs2 = None
+
+        self.bns1 = nn.ModuleDict()
+        self.bns2 = nn.ModuleDict()
+        self.relus1 = nn.ModuleDict()
+        self.relus2 = nn.ModuleDict()
+        self.post_mps = nn.ModuleDict()
+
+        ############# Your code here #############
+        ## (~10 lines of code)
+        ## Note:
+        ## 1. For self.convs1 and self.convs2, call generate_convs at first and then
+        ## pass the returned dictionary of `HeteroGNNConv` to `HeteroGNNWrapperConv`.
+        ## 2. For self.bns, self.relus and self.post_mps, the keys are node_types.
+        ## `deepsnap.hetero_graph.HeteroGraph.node_types` will be helpful.
+        ## 3. Initialize all batchnorms to torch.nn.BatchNorm1d(hidden_size, eps=1.0).
+        ## 4. Initialize all relus to nn.LeakyReLU().
+        ## 5. For self.post_mps, each value in the ModuleDict is a linear layer 
+        ## where the `out_features` is the number of classes for that node type.
+        ## `deepsnap.hetero_graph.HeteroGraph.num_node_labels(node_type)` will be
+        ## useful.
+        self.convs1 = HeteroGNNWrapperConv(generate_convs(hetero_graph, GCNConv, self.hidden_size, first_layer=True), args, aggr=self.aggr)
+        self.convs2 = HeteroGNNWrapperConv(generate_convs(hetero_graph, GCNConv, self.hidden_size), args, aggr=self.aggr)
+        for nt in hetero_graph.node_types:
+            self.bns1[nt] = torch.nn.BatchNorm1d(self.hidden_size, eps=1.0)
+            self.bns2[nt] = torch.nn.BatchNorm1d(self.hidden_size, eps=1.0)
+            self.relus1[nt] = nn.LeakyReLU()
+            self.relus2[nt] = nn.LeakyReLU()
+            self.post_mps[nt] = nn.Linear(self.hidden_size, hetero_graph.num_node_labels(nt))
+
+        ##########################################
+
+    def reset_parameters(self):
+        self.convs1.reset_parameters()
+        self.convs2.reset_parameters()
+        for nt in self.graph.node_types:
+            self.bns1[nt].reset_parameters()
+            self.bns2[nt].reset_parameters()
+            self.post_mps[nt].reset_parameters()
+
+    def forward(self, node_feature, edge_index):
+        # TODO: Implement the forward function. Notice that `node_feature` is 
+        # a dictionary of tensors where keys are node types and values are 
+        # corresponding feature tensors. The `edge_index` is a dictionary of 
+        # tensors where keys are message types and values are corresponding
+        # edge index tensors (with respect to each message type).
+
+        x = node_feature
+
+        ############# Your code here #############
+        ## (~7 lines of code)
+        ## Note:
+        ## 1. `deepsnap.hetero_gnn.forward_op` can be helpful.
+        x = self.convs1(x, edge_index)
+        x = forward_op(x, self.bns1)
+        x = forward_op(x, self.relus1)
+        x = self.convs2(x, edge_index)
+        ##########################################
+        return x
+
+    def loss(self, preds, y, indices):
+        
+        loss = 0
+        loss_func = F.cross_entropy
+
+        ############# Your code here #############
+        ## (~3 lines of code)
+        ## Note:
+        ## 1. For each node type in preds, accumulate computed loss to `loss`
+        ## 2. Loss need to be computed with respect to the given index
+        for k in preds:
+            loss += loss_func(preds[k][indices[k]], y[k][indices[k]])
+        ##########################################
+
+        return loss
