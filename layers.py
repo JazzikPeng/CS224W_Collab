@@ -53,7 +53,7 @@ class SAGEConv(MessagePassing):
         self.lin_r.reset_parameters()
 
     def forward(self, x: Union[Tensor, OptPairTensor], edge_index: Adj,
-                edge_year: Tensor, size: Size = None) -> Tensor:
+                size: Size = None) -> Tensor:
         """"""
         if isinstance(x, Tensor):
             x: OptPairTensor = (x, x)
