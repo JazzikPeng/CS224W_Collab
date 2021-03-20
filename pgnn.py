@@ -20,7 +20,7 @@ from utils import *
 
 from tensorboardX import SummaryWriter
 
-log_dir = os.path.join('./log', "RUN_" + str(1))
+log_dir = os.path.join('./log', "RUN_" + str(2))
 writer = SummaryWriter(log_dir=log_dir)
 
 cls_criterion = torch.nn.BCEWithLogitsLoss()
@@ -37,8 +37,8 @@ def train(model, device, loader, optimizer, task_type, args):
         # Compute distance
         graph_idx, batch = batch
         # Find dists using graph_idx
-        if batch.num_nodes == 3:
-            print(1)
+        # if batch.num_nodes == 3:
+        #     print(1)
         graph_idx = loader.dataset.indices()[graph_idx.item()]
         dists = precompute_distance[graph_idx]
         batch.dists = torch.from_numpy(dists).float()
@@ -55,8 +55,9 @@ def train(model, device, loader, optimizer, task_type, args):
             loss = reg_criterion(pred.to(torch.float32)[is_labeled], batch.y.to(torch.float32)[is_labeled])
         train_loss += loss
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
-    return train_loss
+    return train_loss / (step + 1)
   
 
 def eval(model, device, loader, evaluator, args):
@@ -100,24 +101,19 @@ parser.add_argument('--use_val_as_input', action='store_true')
 parser.add_argument('--graph_pooling', dest='graph_pooling', default='mean', type=str)
 parser.add_argument('--lr', type=float, default=0.001)
 parser.add_argument('--epochs', dest='epochs', default=400, type=int) # implemented via accumulating gradient
-parser.add_argument('--eval_step', dest='eval_steps', default=1, type=int) # implemented via accumulating gradient
-parser.add_argument('--log_step', dest='log_step', default=1, type=int) # implemented via accumulating gradient
 parser.add_argument('--batch_size', dest='batch_size', default=1, type=int) # implemented via accumulating gradient
 parser.add_argument('--layer_num', dest='layer_num', default=2, type=int)
-parser.add_argument('--feature_dim', dest='feature_dim', default=32, type=int)
-parser.add_argument('--hidden_dim', dest='hidden_dim', default=32, type=int)
-parser.add_argument('--output_dim', dest='output_dim', default=32, type=int)
-parser.add_argument('--anchor_num', dest='anchor_num', default=4, type=int)
-parser.add_argument('--num_hops', dest='num_hops', default=1, type=int)
-parser.add_argument('--permute', dest='permute', default=True,
-                    help='whether permute subsets')
+parser.add_argument('--feature_dim', dest='feature_dim', default=64, type=int)
+parser.add_argument('--hidden_dim', dest='hidden_dim', default=64, type=int)
+parser.add_argument('--output_dim', dest='output_dim', default=64, type=int)
+parser.add_argument('--anchor_num', dest='anchor_num', default=8, type=int)
 parser.add_argument('--dropout', dest='dropout', action='store_true',
                     help='whether dropout, default 0.5')
 parser.add_argument('--dropout_no', dest='dropout', action='store_false',
                     help='whether dropout, default 0.5')
 parser.add_argument('--feature_pre', dest='feature_pre', action='store_true',
                         help='whether pre transform feature')
-parser.add_argument('--filename', type=str, default="",
+parser.add_argument('--filename', type=str, default="modelsave",
                         help='filename to output result (default: )')
 parser.add_argument('--feature', type=str, default="full",
                         help='full feature or simple feature')
@@ -163,8 +159,13 @@ valid_loader = DataLoader(dataset[split_idx["valid"]], batch_size=args.batch_siz
 test_loader = DataLoader(dataset[split_idx["test"]], batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers)
 
 num_features = 9 # dataset[0][1].x.shape[1] # use dataset.idx
-model = PGNN(input_dim=num_features, feature_dim=args.feature_dim,
-            hidden_dim=args.hidden_dim, output_dim=args.output_dim,
+# model = PGNN(input_dim=num_features, feature_dim=args.feature_dim,
+#             hidden_dim=args.hidden_dim, output_dim=args.output_dim,
+#             feature_pre=args.feature_pre, layer_num=args.layer_num, 
+#             dropout=args.dropout, graph_pooling=args.graph_pooling).to(device)
+
+model = PGNN_node(input_dim=num_features, feature_dim=300,
+            hidden_dim=300, output_dim=300,
             feature_pre=args.feature_pre, layer_num=args.layer_num, 
             dropout=args.dropout, graph_pooling=args.graph_pooling).to(device)
 
@@ -202,11 +203,11 @@ for epoch in range(1, args.epochs + 1):
 
     writer.add_scalar('train/_loss', loss, epoch)
     
-    writer.add_scalar('train/_perf', valid_perf, epoch)
+    writer.add_scalar('train/_perf', train_perf['rocauc'], epoch)
 
-    writer.add_scalar('val/_perf', valid_perf, epoch)
+    writer.add_scalar('val/_perf', valid_perf['rocauc'], epoch)
     
-    writer.add_scalar('test/_perf', test_curve, epoch)
+    writer.add_scalar('test/_perf', test_perf['rocauc'], epoch)
     
     writer.add_scalar('learning_rate', optimizer.param_groups[0]['lr'], epoch) 
 
