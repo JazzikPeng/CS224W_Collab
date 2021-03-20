@@ -20,7 +20,7 @@ from utils import *
 
 from tensorboardX import SummaryWriter
 
-log_dir = os.path.join('./log', "RUN_" + str(0))
+log_dir = os.path.join('./log', "RUN_" + str(1))
 writer = SummaryWriter(log_dir=log_dir)
 
 cls_criterion = torch.nn.BCEWithLogitsLoss()
@@ -37,7 +37,10 @@ def train(model, device, loader, optimizer, task_type, args):
         # Compute distance
         graph_idx, batch = batch
         # Find dists using graph_idx
-        dists = precompute_dist_data(batch.edge_index.numpy(), batch.num_nodes, approximate=-1)
+        if batch.num_nodes == 3:
+            print(1)
+        graph_idx = loader.dataset.indices()[graph_idx.item()]
+        dists = precompute_distance[graph_idx]
         batch.dists = torch.from_numpy(dists).float()
         preselect_anchor(batch, layer_num=args.layer_num, anchor_num=args.anchor_num, device='cpu')
 
@@ -62,7 +65,13 @@ def eval(model, device, loader, evaluator, args):
     y_pred = []
 
     for step, batch in enumerate(tqdm(loader, desc="Iteration")):
-        dists = precompute_dist_data(batch.edge_index.numpy(), batch.num_nodes, approximate=-1)
+        # dists = precompute_dist_data(batch.edge_index.numpy(), batch.num_nodes, approximate=-1)
+        # batch.dists = torch.from_numpy(dists).float()
+        # preselect_anchor(batch, layer_num=args.layer_num, anchor_num=args.anchor_num, device='cpu')
+        graph_idx, batch = batch
+        # Find dists using graph_idx
+        graph_idx = loader.dataset.indices()[graph_idx.item()]
+        dists = precompute_distance[graph_idx]
         batch.dists = torch.from_numpy(dists).float()
         preselect_anchor(batch, layer_num=args.layer_num, anchor_num=args.anchor_num, device='cpu')
         batch = batch.to(device)
@@ -123,15 +132,17 @@ dataset = PygGraphPropPredDataset(name ='ogbg-molhiv')
 
 device = torch.device("cuda:" + str(args.device)) if torch.cuda.is_available() else torch.device("cpu")
 
-precompute_distance = {}
-for i, (_, data) in enumerate(dataset):
-    dists = precompute_dist_data(data.edge_index.numpy(), data.num_nodes, approximate=-1)
-    # dists = torch.from_numpy(dists).float() 
-    precompute_distance[0] = dists 
+if not os.path.exists("dists.npy"):
+    precompute_distance = {}
+    for i, (_, data) in enumerate(tqdm(dataset, desc="Create distance")):
+        dists = precompute_dist_data(data.edge_index.numpy(), data.num_nodes, approximate=-1)
+        # dists = torch.from_numpy(dists).float() 
+        precompute_distance[i] = dists 
+else:
+    # np.save('dists.npy', precompute_distance)
+    precompute_distance = np.load('dists.npy', allow_pickle=True)
 
-np.save('dists.npy', precompute_distance)
-precompute_distance = np.load('dists.npy', allow_pickle=True)
-
+precompute_distance = precompute_distance.item()
 
 # Save dataset object
 if args.feature == 'full':
@@ -147,7 +158,7 @@ split_idx = dataset.get_idx_split()
 evaluator = Evaluator(name ='ogbg-molhiv')
 
 # TODO: Precompute distance and map each graph index
-train_loader = DataLoader(dataset[split_idx["train"]], batch_size=args.batch_size, shuffle=True, num_workers = args.num_workers)
+train_loader = DataLoader(dataset[split_idx["train"]], batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers)
 valid_loader = DataLoader(dataset[split_idx["valid"]], batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers)
 test_loader = DataLoader(dataset[split_idx["test"]], batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers)
 
@@ -162,7 +173,7 @@ optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 valid_curve = []
 test_curve = []
-# train_curve = []
+train_curve = []
 
 print("Start")
 for epoch in range(1, args.epochs + 1):
@@ -171,27 +182,28 @@ for epoch in range(1, args.epochs + 1):
     loss = train(model, device, train_loader, optimizer, dataset.task_type, args)
 
     print('Evaluating...')
-    # train_perf = eval(model, device, train_loader, evaluator, args)
+    train_perf = eval(model, device, train_loader, evaluator, args)
     valid_perf = eval(model, device, valid_loader, evaluator, args)
     test_perf = eval(model, device, test_loader, evaluator, args)
 
     print({'Train': train_perf, 'Validation': valid_perf, 'Test': test_perf})
 
-    # train_curve.append(train_perf[dataset.eval_metric])
+    train_curve.append(train_perf[dataset.eval_metric])
     valid_curve.append(valid_perf[dataset.eval_metric])
     test_curve.append(test_perf[dataset.eval_metric])
 
 
-
     if 'classification' in dataset.task_type:
         best_val_epoch = np.argmax(np.array(valid_curve))
-        # best_train = max(train_curve)
+        best_train = max(train_curve)
     else:
         best_val_epoch = np.argmin(np.array(valid_curve))
-        # best_train = min(train_curve)
+        best_train = min(train_curve)
 
     writer.add_scalar('train/_loss', loss, epoch)
     
+    writer.add_scalar('train/_perf', valid_perf, epoch)
+
     writer.add_scalar('val/_perf', valid_perf, epoch)
     
     writer.add_scalar('test/_perf', test_curve, epoch)
@@ -203,7 +215,9 @@ for epoch in range(1, args.epochs + 1):
     print('Best validation score: {}'.format(valid_curve[best_val_epoch]))
     print('Test score: {}'.format(test_curve[best_val_epoch]))
 
+writer.close()
 if not args.filename == '':
-    torch.save({'Val': valid_curve[best_val_epoch], 'Test': test_curve[best_val_epoch], 'Train': [best_val_epoch]}, args.filename)
+    torch.save({'Val': valid_curve[best_val_epoch], 'Test': test_curve[best_val_epoch], 'Train': train_curve[best_val_epoch], 'BestTrain': best_train}, args.filename)
+
 
 

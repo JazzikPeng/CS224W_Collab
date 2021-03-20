@@ -33,18 +33,23 @@ class PGNN_layer(nn.Module):
 
     def forward(self, feature, dists_max, dists_argmax):
         if self.dist_trainable:
-            dists_max = self.dist_compute(dists_max.unsqueeze(-1)).squeeze()
+            dists_max = self.dist_compute(dists_max.unsqueeze(-1)).squeeze(-1) # Nonlinear layer return incorrect shape
 
         subset_features = feature[dists_argmax.flatten(), :]
         subset_features = subset_features.reshape((dists_argmax.shape[0], dists_argmax.shape[1],
                                                    feature.shape[1]))
         messages = subset_features * dists_max.unsqueeze(-1) # (2708, 121, 32) * (2708, 121, 1)
 
+        # Sizes of tensors must match except in dimension 2. Got 30 and 23 in dimension 0 (The offending index is 1)
         self_feature = feature.unsqueeze(1).repeat(1, dists_max.shape[1], 1)
         messages = torch.cat((messages, self_feature), dim=-1) # messages: (2708, 121, 32*2)
-
-        messages = self.linear_hidden(messages).squeeze()
-        messages = self.act(messages) # n*m*d
+        
+        if messages.shape[1] == 1:
+            messages = self.linear_hidden(messages)
+            messages = self.act(messages) # n*m*d
+        else:
+            messages = self.linear_hidden(messages).squeeze()
+            messages = self.act(messages) # n*m*d
 
         out_position = self.linear_out_position(messages).squeeze(-1)  # n*m_out
         out_structure = torch.mean(messages, dim=1)  # n*d

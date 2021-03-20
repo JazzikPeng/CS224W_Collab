@@ -188,7 +188,7 @@ def precompute_dist_data(edge_index, num_nodes, approximate=0):
 
 def get_random_anchorset(n,c=0.5):
     m = int(np.log2(n))
-    copy = int(c*m)
+    copy = max(int(c*m), 1) # at least one set of anchor
     anchorset_id = []
     for i in range(m):
         anchor_size = int(n/np.exp2(i + 1))
