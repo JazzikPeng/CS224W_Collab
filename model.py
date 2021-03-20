@@ -351,7 +351,6 @@ class PGNNConv(nn.Module):
         super(PGNNConv, self).__init__()
         self.input_dim = input_dim
         self.dist_trainable = dist_trainable
-        # self.bond_encoder = BondEncoder(emb_dim = emb_dim)
         if self.dist_trainable:
             self.dist_compute = Nonlinear(1, output_dim, 1)
 
@@ -361,18 +360,17 @@ class PGNNConv(nn.Module):
         self.linear_out_structure = nn.Linear(emb_dim * 2, emb_dim)
         self.act = nn.ReLU()
 
-        self.edge_convs = GCNConv(emb_dim)
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 m.weight.data = init.xavier_uniform_(m.weight.data, gain=nn.init.calculate_gain('relu'))
                 if m.bias is not None:
                     m.bias.data = init.constant_(m.bias.data, 0.0)
 
-    def forward(self, feature, dists_max, dists_argmax, edge_index, edge_attr):
+    def forward(self, feature, dists_max, dists_argmax, edge_attr):
         if self.dist_trainable:
             dists_max = self.dist_compute(dists_max.unsqueeze(-1)).squeeze(-1) # Nonlinear layer return incorrect shape
 
-        edge_attr = self.edge_convs(feature, edge_index, edge_attr)
+        # edge_attr = self.edge_convs(feature, edge_index, edge_attr)
         feature = self.linear_feat(feature)
 
         subset_features = feature[dists_argmax.flatten(), :]
@@ -408,20 +406,25 @@ class PGNN_node(torch.nn.Module):
         self.graph_pooling = graph_pooling
         self.output_dim = output_dim
         self.batch_norms = torch.nn.ModuleList()
+        self.edge_convs = torch.nn.ModuleList()
         if layer_num == 1:
             hidden_dim = output_dim
         hidden_dim = emb_dim
         output_dim = emb_dim
         if feature_pre:
             self.linear_pre = nn.Linear(emb_dim, feature_dim)
-            self.conv_first = PGNNConv(emb_dim, hidden_dim)
+            self.conv_first = PGNNConv(emb_dim, hidden_dim, emb_dim=emb_dim)
+            self.edge_conv1 = GCNConv(emb_dim)
+            self.bn_first = torch.nn.BatchNorm1d(hidden_dim)
         else:
-            self.conv_first = PGNNConv(emb_dim, hidden_dim)
+            self.conv_first = PGNNConv(emb_dim, hidden_dim, emb_dim=emb_dim)
+            self.edge_conv1 = GCNConv(emb_dim)
             self.bn_first = torch.nn.BatchNorm1d(hidden_dim)
         if layer_num>1:
-            self.conv_hidden = nn.ModuleList([PGNNConv(hidden_dim, hidden_dim) for i in range(layer_num - 2)])
+            self.conv_hidden = nn.ModuleList([PGNNConv(hidden_dim, hidden_dim, emb_dim=emb_dim) for i in range(layer_num - 2)])
             self.batch_norms = nn.ModuleList([torch.nn.BatchNorm1d(hidden_dim) for i in range(layer_num - 2)])
-            self.conv_out = PGNNConv(hidden_dim, output_dim)
+            self.edge_convs = nn.ModuleList([GCNConv(emb_dim) for i in range(layer_num - 1)])
+            self.conv_out = PGNNConv(hidden_dim, output_dim, emb_dim=emb_dim)
 
         self.atom_encoder = AtomEncoder(emb_dim)
 
@@ -452,7 +455,9 @@ class PGNN_node(torch.nn.Module):
 
         if self.feature_pre:
             x = self.linear_pre(x)
-        x_position, x = self.conv_first(x, data.dists_max, data.dists_argmax, edge_index, edge_attr) # (2708, 121), (2708, 32)
+        h = self.edge_conv1(x, edge_index, edge_attr)
+        x_position, x = self.conv_first(x, data.dists_max, data.dists_argmax, h) # (2708, 121), (2708, 32)
+
         if self.layer_num == 1:
             return x_position
         x = self.bn_first(x)
@@ -460,12 +465,14 @@ class PGNN_node(torch.nn.Module):
         if self.dropout:
             x = F.dropout(x, training=self.training)
         for i in range(self.layer_num-2):
-            _, x = self.conv_hidden[i](x, data.dists_max, data.dists_argmax, edge_index, edge_attr)
+            h = self.edge_convs[i](h, edge_index, edge_attr)
+            _, x = self.conv_hidden[i](x, data.dists_max, data.dists_argmax, edge_index, h)
             x = self.batch_norms[i](x) 
             x = F.relu(x) # Note: optional!
             if self.dropout:
                 x = F.dropout(x, training=self.training)
-        x_position, x = self.conv_out(x, data.dists_max, data.dists_argmax, edge_index,edge_attr)
+        h = self.edge_convs[-1](h, edge_index, edge_attr)
+        x_position, x = self.conv_out(x, data.dists_max, data.dists_argmax, h)
         # x_position = F.normalize(x_position, p=2, dim=-1)
         h_graph = self.pool(x, data.batch)
         return self.graph_pred_linear(h_graph)

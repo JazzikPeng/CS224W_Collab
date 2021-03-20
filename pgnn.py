@@ -20,7 +20,7 @@ from utils import *
 
 from tensorboardX import SummaryWriter
 
-log_dir = os.path.join('./log', "RUN_" + str(2))
+log_dir = os.path.join('./log', "RUN_" + str(3))
 writer = SummaryWriter(log_dir=log_dir)
 
 cls_criterion = torch.nn.BCEWithLogitsLoss()
@@ -105,6 +105,7 @@ parser.add_argument('--batch_size', dest='batch_size', default=1, type=int) # im
 parser.add_argument('--layer_num', dest='layer_num', default=2, type=int)
 parser.add_argument('--feature_dim', dest='feature_dim', default=64, type=int)
 parser.add_argument('--hidden_dim', dest='hidden_dim', default=64, type=int)
+parser.add_argument('--emb_dim', dest='emb_dim', default=64, type=int)
 parser.add_argument('--output_dim', dest='output_dim', default=64, type=int)
 parser.add_argument('--anchor_num', dest='anchor_num', default=8, type=int)
 parser.add_argument('--dropout', dest='dropout', action='store_true',
@@ -164,10 +165,10 @@ num_features = 9 # dataset[0][1].x.shape[1] # use dataset.idx
 #             feature_pre=args.feature_pre, layer_num=args.layer_num, 
 #             dropout=args.dropout, graph_pooling=args.graph_pooling).to(device)
 
-model = PGNN_node(input_dim=num_features, feature_dim=300,
-            hidden_dim=300, output_dim=300,
+model = PGNN_node(input_dim=num_features, feature_dim=args.emb_dim,
+            hidden_dim=args.emb_dim, output_dim=args.emb_dim,
             feature_pre=args.feature_pre, layer_num=args.layer_num, 
-            dropout=args.dropout, graph_pooling=args.graph_pooling).to(device)
+            dropout=args.dropout, graph_pooling=args.graph_pooling, emb_dim=args.emb_dim).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
