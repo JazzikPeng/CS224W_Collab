@@ -1,5 +1,6 @@
 """
-Add node to node distance in graphs
+Add node to node distance in graphs.
+Let's fix anchor for each graph
 """
 
 import torch
@@ -41,8 +42,14 @@ def train(model, device, loader, optimizer, task_type, args):
         #     print(1)
         graph_idx = loader.dataset.indices()[graph_idx.item()]
         dists = precompute_distance[graph_idx]
+        dists_max = fix_dists_max[graph_idx]
+        dists_argmax = fix_dists_argmax[graph_idx]
+
         batch.dists = torch.from_numpy(dists).float()
-        preselect_anchor(batch, layer_num=args.layer_num, anchor_num=args.anchor_num, device='cpu')
+        batch.dists_max = torch.from_numpy(dists_max).float()
+        batch.dists_argmax = torch.from_numpy(dists_argmax).long()
+
+        # preselect_anchor(batch, layer_num=args.layer_num, anchor_num=args.anchor_num, device='cpu')
 
         batch = batch.to(device)
         pred = model(batch)
@@ -70,11 +77,17 @@ def eval(model, device, loader, evaluator, args):
         # batch.dists = torch.from_numpy(dists).float()
         # preselect_anchor(batch, layer_num=args.layer_num, anchor_num=args.anchor_num, device='cpu')
         graph_idx, batch = batch
-        # Find dists using graph_idx
+
         graph_idx = loader.dataset.indices()[graph_idx.item()]
         dists = precompute_distance[graph_idx]
+        dists_max = fix_dists_max[graph_idx]
+        dists_argmax = fix_dists_argmax[graph_idx]
+
         batch.dists = torch.from_numpy(dists).float()
-        preselect_anchor(batch, layer_num=args.layer_num, anchor_num=args.anchor_num, device='cpu')
+        batch.dists_max = torch.from_numpy(dists_max).float()
+        batch.dists_argmax = torch.from_numpy(dists_argmax).long()
+
+        # preselect_anchor(batch, layer_num=args.layer_num, anchor_num=args.anchor_num, device='cpu')
         batch = batch.to(device)
 
         if batch.x.shape[0] == 1:
@@ -107,7 +120,7 @@ parser.add_argument('--feature_dim', dest='feature_dim', default=64, type=int)
 parser.add_argument('--hidden_dim', dest='hidden_dim', default=64, type=int)
 parser.add_argument('--emb_dim', dest='emb_dim', default=64, type=int)
 parser.add_argument('--output_dim', dest='output_dim', default=64, type=int)
-parser.add_argument('--anchor_num', dest='anchor_num', default=8, type=int)
+parser.add_argument('--anchor_num', dest='anchor_num', default=4, type=int)
 parser.add_argument('--dropout', dest='dropout', action='store_true',
                     help='whether dropout, default 0.5')
 parser.add_argument('--dropout_no', dest='dropout', action='store_false',
@@ -135,11 +148,29 @@ if not os.path.exists("dists.npy"):
         dists = precompute_dist_data(data.edge_index.numpy(), data.num_nodes, approximate=-1)
         # dists = torch.from_numpy(dists).float() 
         precompute_distance[i] = dists 
+    np.save('dists.npy', precompute_distance)
 else:
     # np.save('dists.npy', precompute_distance)
     precompute_distance = np.load('dists.npy', allow_pickle=True)
 
 precompute_distance = precompute_distance.item()
+# from copy import deepcopy
+if False:
+    dist_max = {}
+    dist_argmax = {}
+    for i, (graph_idx, data) in enumerate(tqdm(dataset, desc="Create distance")):
+        dists = precompute_distance[graph_idx]
+        data.dists = torch.from_numpy(dists).float()
+        preselect_anchor(data, layer_num=args.layer_num, anchor_num=args.anchor_num, device='cpu')
+        # dists = torch.from_numpy(dists).float() 
+        dist_max[i] = data.dists_max.numpy()
+        dist_argmax[i] = data.dists_argmax.numpy()
+
+    np.save("fix_dist_max.npy", dist_max)
+    np.save("fix_dist_argmax.npy", dist_argmax)
+
+fix_dists_max = np.load('fix_dist_max.npy', allow_pickle=True).item()
+fix_dists_argmax = np.load('fix_dist_argmax.npy', allow_pickle=True).item()
 
 # Save dataset object
 if args.feature == 'full':

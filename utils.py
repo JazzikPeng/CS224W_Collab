@@ -222,6 +222,20 @@ def preselect_anchor(data, layer_num=1, anchor_num=32, anchor_size_num=4, device
     anchorset_id = get_random_anchorset(data.num_nodes,c=1)
     data.dists_max, data.dists_argmax = get_dist_max(anchorset_id, data.dists, device)
 
+def fix_preselect_anchor(data, anchors, anchorset_id, layer_num=1, anchor_num=32, anchor_size_num=4, device='cpu'):
+
+    data.anchor_size_num = anchor_size_num
+    data.anchor_set = []
+    anchor_num_per_size = anchor_num//anchor_size_num
+    for i in range(anchor_size_num):
+        anchor_size = 2**(i+1)-1
+        anchors = anchors # np.random.choice(data.num_nodes, size=(layer_num,anchor_num_per_size,anchor_size), replace=True)
+        data.anchor_set.append(anchors)
+    data.anchor_set_indicator = np.zeros((layer_num, anchor_num, data.num_nodes), dtype=int)
+
+    anchorset_id = anchorset_id # get_random_anchorset(data.num_nodes,c=1)
+    data.dists_max, data.dists_argmax = get_dist_max(anchorset_id, data.dists, device)
+
 
 
 class Dataset(torch.utils.data.Dataset):
